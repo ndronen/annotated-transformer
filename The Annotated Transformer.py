@@ -90,6 +90,8 @@ class LayerNorm(nn.Module):
 
     def __init__(self, features, eps=1e-6):
         super(LayerNorm, self).__init__()
+	# This is basically batch normalization. a_2, b_2 correspond
+	# to gamma, beta.
         self.a_2 = nn.Parameter(torch.ones(features))
         self.b_2 = nn.Parameter(torch.zeros(features))
         self.eps = eps
@@ -310,7 +312,7 @@ def make_model(src_vocab,
     # Initialize parameters with Glorot / fan_avg.
     for p in model.parameters():
         if p.dim() > 1:
-            nn.init.xavier_uniform(p)
+            nn.init.xavier_uniform_(p)
     return model
 
 
