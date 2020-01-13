@@ -15,6 +15,8 @@ from torch.autograd import Variable
 #import seaborn
 #seaborn.set_context(context="talk")
 
+debug = True
+
 ###########################################################################
 # Utilities
 ###########################################################################
@@ -50,12 +52,30 @@ class EncoderDecoder(nn.Module):
         return decoding
 
     def encode(self, src, src_mask):
+        if debug:
+            print(
+                'encoder input src', src.shape, 'src_mask', src_mask.shape)
         embedding = self.src_embed(src)
-        encoding = self.encoder(embedding, src_mask)
+        if debug:
+            print('encoder embedding', embedding.shape)
+        output = self.encoder(embedding, src_mask)
+        if debug:
+            print('encoder output', output.shape)
+        return output
 
     def decode(self, memory, src_mask, tgt, tgt_mask):
+        if debug:
+            print(
+                'decoder input memory', memory.shape,
+                'src_mask', src_mask.shape, 'tgt', tgt.shape,
+                'tgt_mask', tgt_mask.shape)
         embedding = self.tgt_embed(tgt)
-        decoding = self.decoder(embedding, memory, src_mask, tgt_mask)
+        if debug:
+            print('decoder embedding', embedding.shape)
+        output = self.decoder(embedding, memory, src_mask, tgt_mask)
+        if debug:
+            print('decoder output', output.shape)
+        return output
 
 
 class Generator(nn.Module):
@@ -133,8 +153,12 @@ class EncoderLayer(nn.Module):
 
     def forward(self, x, mask):
         "Follow Figure 1 (left) for connections."
+        print('EncoderLayer input', x.shape)
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
-        return self.sublayer[1](x, self.feed_forward)
+        print('EncoderLayer 1', x.shape)
+        x = self.sublayer[1](x, self.feed_forward)
+        print('EncoderLayer 2', x.shape)
+        return x
 
 
 ###########################################################################
@@ -189,6 +213,8 @@ def subsequent_mask(size):
 
 def attention(query, key, value, mask=None, dropout=None):
     "Compute 'Scaled Dot Product Attention'"
+    if debug:
+        print('attention', 'Q', query.shape, 'K', key.shape, 'V', value.shape)
     d_k = query.size(-1)
     scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
     if mask is not None:
@@ -248,7 +274,19 @@ class PositionwiseFeedForward(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        return self.w_2(self.dropout(F.relu(self.w_1(x))))
+        if debug:
+            print('PositionwiseFeedForward input', x.shape)
+
+        x = self.w_1(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.w_2(x)
+
+        if debug:
+            print('PositionwiseFeedForward output', x.shape)
+
+        return x
+
 
 
 ###########################################################################
@@ -489,28 +527,48 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
 if __name__ == '__main__':
     # Train the simple copy task.
     V = 11
+    N = 2
+    d_model = 512
+    d_ff = 2048
+    h = 8
+    model = make_model(
+        src_vocab=V, tgt_vocab=V, N=N, d_model=d_model, d_ff=d_ff, h=h)
+
     criterion = LabelSmoothing(size=V, padding_idx=0, smoothing=0.0)
-    model = make_model(V, V, N=2)
+
     model_opt = NoamOpt(
-        model.src_embed[0].d_model, 1, 400,
-        torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98),
-                         eps=1e-9))
+        model_size=model.src_embed[0].d_model,
+        factor=1,
+        warmup=400,
+        optimizer=torch.optim.Adam(
+            model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
 
-    print('Training model to copy input to output for 10 epochs')
+    nepochs = 1
+    batch = 30
+    train_nbatches = 20
+    val_nbatches = 5
+    print('Training model to copy input to output')
+    print(f'V={V} N={N} d_model={d_model} d_ff={d_ff} h={h}')
+    print(f'batch size={batch}')
+    print(f'train nbatches={train_nbatches}')
+    print(f'val nbatches={val_nbatches}')
+    print(model)
 
-    for epoch in range(10):
+    for epoch in range(nepochs):
         model.train()
-        run_epoch(data_gen(V, 30, 20), model,
+        run_epoch(data_gen(V, batch, train_nbatches), model,
                   SimpleLossCompute(model.generator, criterion, model_opt))
         model.eval()
         print(
-            run_epoch(data_gen(V, 30, 5), model,
+            run_epoch(data_gen(V, batch, val_nbatches), model,
                       SimpleLossCompute(model.generator, criterion, None)))
 
     print('Running greedy decoding')
     model.eval()
     src = Variable(torch.LongTensor([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]))
     src_mask = Variable(torch.ones(1, 1, 10))
-    print('  Input', src)
+    if debug:
+        print('  Input', src)
     output = greedy_decode(model, src, src_mask, max_len=10, start_symbol=1)
-    print('  Output', output)
+    if debug:
+        print('  Output', output)
